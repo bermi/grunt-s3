@@ -5,7 +5,7 @@
  * Module dependencies.
  */
 
-// Core.
+// Core
 var util = require('util');
 var crypto = require('crypto');
 var fs = require('fs');
@@ -13,8 +13,8 @@ var path = require('path');
 var url = require('url');
 var zlib = require('zlib');
 
-// Npm.
-var knox = require('knox');
+// Npm
+var aws = require('aws-sdk');   // http://docs.aws.amazon.com/AWSJavaScriptSDK/latest/frames.html
 var mime = require('mime');
 var deferred = require('underscore.deferred');
 var Tempfile = require('temporary/lib/file');
@@ -22,12 +22,11 @@ var Tempfile = require('temporary/lib/file');
 // Local
 var common = require('./common');
 
-// Avoid warnings.
+// Avoid warnings
 var existsSync = ('existsSync' in fs) ? fs.existsSync : path.existsSync;
 
-/**
- * Success/error messages.
- */
+
+// Success/error messages
 var MSG_UPLOAD_SUCCESS = '↗'.blue + ' Uploaded: %s (%s)';
 var MSG_DOWNLOAD_SUCCESS = '↙'.yellow + ' Downloaded: %s (%s)';
 var MSG_DELETE_SUCCESS = '✗'.red + ' Deleted: %s';
@@ -48,6 +47,57 @@ var MSG_ERR_DOWNLOAD = 'Download error: %s (%s)';
 var MSG_ERR_DELETE = 'Delete error: %s (%s)';
 var MSG_ERR_COPY = 'Copy error: %s to %s';
 var MSG_ERR_CHECKSUM = '%s error: expected hash: %s but found %s for %s';
+
+
+function updateAmazonConfig (key, secret, secure) {
+  // TODO: this might be useful, but remove it later if not
+    /*
+    // convert the config keys to ones that Amazon's SDK understands
+    var awsOptMap = {
+      key    : 'accessKeyId',
+      secret : 'secretAccessKey',
+      secure : 'sslEnabled'
+    };
+
+    var awsKey, key;
+    for (key in awsOptMap) {
+      awsKey = awsOptMap[key];
+      if (options[key]) {
+        options[awsKey] = options[key];
+      }
+    }
+    */
+  
+  // set the configuration options on the Amazon S3 object
+  aws.config.update({
+    accessKeyId : key,
+    secretAccessKey : secret,
+    sslEnabled : secure
+  }); 
+}
+
+function generateAmazonParams(dest, body, headers, options) {
+  // Get an md5 of the local file so we can verify the upload.
+  var localHash = crypto.createHash('md5').update(body).digest('hex');
+
+  var params = {
+    ACL        : options.access,
+    Body       : body,
+    Bucket     : options.bucket,
+    ContentMD5 : localHash,
+    Key        : dest 
+  };
+
+  // insert headers into the parameter list
+  var header, value;
+   for (header in headers) {
+    value = headers[header];
+    // Amazon doesn't have any dashes in header params (e.g.,Content-Type becomes ContentType)
+    params[header.replace('-', '')] = value;
+  }
+
+  return params;
+}
 
 exports.init = function (grunt) {
   var async = grunt.util.async;
@@ -93,14 +143,14 @@ exports.init = function (grunt) {
 
     var headers = options.headers || {};
 
-    if (options.access) {
-      headers['x-amz-acl'] = options.access;
-    }
-
     // Pick out the configuration options we need for the client.
-    var client = knox.createClient(_(options).pick([
-      'region', 'endpoint', 'port', 'key', 'secret', 'access', 'bucket', 'secure'
-    ]));
+    options = _.pick(options, [ 'region', 'endpoint', 'port', 'key', 'secret', 'access', 'bucket', 'secure', 'debug' ]);
+    
+    options.access = options.access || 'private';  // set the default ACL
+
+    updateAmazonConfig(options.key, options.secret, options.secure);
+
+    var client = new aws.S3(options);
 
     if (options.debug) {
       return dfd.resolve(util.format(MSG_UPLOAD_DEBUG, path.relative(process.cwd(), src), client.bucket, dest)).promise();
@@ -111,39 +161,46 @@ exports.init = function (grunt) {
     var upload = function (cb) {
       cb = cb || function () {};
 
-      // Upload the file to s3.
-      client.putFile(src, dest, headers, function (err, res) {
-        // If there was an upload error or any status other than a 200, we
-        // can assume something went wrong.
-        if (err || res.statusCode !== 200) {
-          cb(makeError(MSG_ERR_UPLOAD, src, err || res.statusCode));
+      // Read the local file so we can get its md5 hash.
+      fs.readFile(src, function (err, data) {
+        if (err) {
+          cb(makeError(MSG_ERR_UPLOAD, src, err));
         }
         else {
-          // Read the local file so we can get its md5 hash.
-          fs.readFile(src, function (err, data) {
-            if (err) {
-              cb(makeError(MSG_ERR_UPLOAD, src, err));
-            }
-            else {
-              // The etag head in the response from s3 has double quotes around
-              // it. Strip them out.
-              var remoteHash = res.headers.etag.replace(/"/g, '');
+          params = generateAmazonParams(dest, data, headers, options);
 
-              // Get an md5 of the local file so we can verify the upload.
-              var localHash = crypto.createHash('md5').update(data).digest('hex');
-
-              if (remoteHash === localHash) {
-                var msg = util.format(MSG_UPLOAD_SUCCESS, src, localHash);
-                cb(null, msg);
+          // Upload the file to s3.
+          client.putObject(params, function(err, res){
+              console.log('upload response', err, res);
+              // If there was an upload error or any status other than a 200, we
+              // can assume something went wrong.
+              if (err || res.statusCode !== 200) {
+                cb(makeError(MSG_ERR_UPLOAD, src, err || res.statusCode));
               }
               else {
-                cb(makeError(MSG_ERR_CHECKSUM, 'Upload', localHash, remoteHash, src));
+                // The etag head in the response from s3 has double quotes around
+                // it. Strip them out.
+                var remoteHash = res.headers.etag.replace(/"/g, '');
+
+                // Get an md5 of the local file so we can verify the upload.
+                var localHash = crypto.createHash('md5').update(data).digest('hex');
+
+                if (remoteHash === localHash) {
+                  var msg = util.format(MSG_UPLOAD_SUCCESS, src, localHash);
+                  cb(null, msg);
+                }
+                else {
+                  cb(makeError(MSG_ERR_CHECKSUM, 'Upload', localHash, remoteHash, src));
+                }
               }
+
             }
-          });
+          );
+
         }
       });
     };
+
 
     // prepare gzip exclude option
     var gzipExclude = options.gzipExclude || [];
@@ -219,9 +276,11 @@ exports.init = function (grunt) {
     var options = _.clone(opts);
 
     // Pick out the configuration options we need for the client.
-    var client = knox.createClient(_(options).pick([
-      'region', 'endpoint', 'port', 'key', 'secret', 'access', 'bucket'
-    ]));
+    options = _.pick(options, [ 'region', 'endpoint', 'port', 'key', 'secret', 'access', 'bucket', 'debug' ]);
+
+    updateAmazonConfig(options.key, options.secret);
+
+    var client = new aws.S3(options);
 
     if (options.debug) {
       return dfd.resolve(util.format(MSG_DOWNLOAD_DEBUG, client.bucket, src, path.relative(process.cwd(), dest))).promise();
@@ -230,47 +289,33 @@ exports.init = function (grunt) {
     // Create a local stream we can write the downloaded file to.
     var file = fs.createWriteStream(dest);
 
-    // Upload the file to s3.
-    client.getFile(src, function (err, res) {
-      // If there was an upload error or any status other than a 200, we
-      // can assume something went wrong.
+    // get the file from s3
+    client.getObject({ Bucket: options.bucket, Key: src }, function(err, res) {
       if (err || res.statusCode !== 200) {
         return dfd.reject(makeError(MSG_ERR_DOWNLOAD, src, err || res.statusCode));
       }
 
-      res
-        .on('data', function (chunk) {
-          file.write(chunk);
-        })
-        .on('error', function (err) {
+      fs.writeFile(dest, res.Body, function(err){
+        if (err){
           return dfd.reject(makeError(MSG_ERR_DOWNLOAD, src, err));
-        })
-        .on('end', function () {
-          file.end();
+        }
+        else {
+          // The etag head in the response from s3 has double quotes around it.
+          // Strip them out.
+          var remoteHash = res.ETag.replace(/"/g, '');
 
-          // Read the local file so we can get its md5 hash.
-          fs.readFile(dest, function (err, data) {
-            if (err) {
-              return dfd.reject(makeError(MSG_ERR_DOWNLOAD, src, err));
-            }
-            else {
-              // The etag head in the response from s3 has double quotes around
-              // it. Strip them out.
-              var remoteHash = res.headers.etag.replace(/"/g, '');
+          // Get an md5 of the local file so we can verify the download.
+          var localHash = crypto.createHash('md5').update(res.Body).digest('hex');
 
-              // Get an md5 of the local file so we can verify the download.
-              var localHash = crypto.createHash('md5').update(data).digest('hex');
-
-              if (remoteHash === localHash) {
-                var msg = util.format(MSG_DOWNLOAD_SUCCESS, src, localHash);
-                dfd.resolve(msg);
-              }
-              else {
-                dfd.reject(makeError(MSG_ERR_CHECKSUM, 'Download', localHash, remoteHash, src));
-              }
-            }
-          });
-        });
+          if (remoteHash === localHash) {
+            var msg = util.format(MSG_DOWNLOAD_SUCCESS, src, localHash);
+            dfd.resolve(msg);
+          }
+          else {
+            dfd.reject(makeError(MSG_ERR_CHECKSUM, 'Download', localHash, remoteHash, src));
+          }
+        }
+      });
     });
 
     return dfd.promise();
