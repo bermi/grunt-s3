@@ -59,15 +59,17 @@ function updateAmazonConfig (key, secret, secure) {
 }
 
 function generateAmazonParams(dest, body, headers, options) {
-  // Get an md5 of the local file so we can verify the upload.
+  // Get an md5 of the local file so we can set the MD5 on upload
   //var localHash = crypto.createHash('md5').update(body).digest('hex');
-
+  //localHash = new Buffer(localHash).toString('base64');
+  //localHash = '"' + localHash + '"';
+  
   var params = {
     ACL        : options.access,
     Body       : body,
     Bucket     : options.bucket,
     // TODO: why does this cause S3 upload failure?   https://github.com/fog/fog/issues/928
-    //ContentMD5 : new Buffer(localHash).toString('base64'),
+    //ContentMD5 : localHash,
     Key        : dest 
   };
 
@@ -162,7 +164,7 @@ exports.init = function (grunt) {
               else {
                 // The etag head in the response from s3 has double quotes around
                 // it. Strip them out.
-                var remoteHash = res.headers.etag.replace(/"/g, '');
+                var remoteHash = res.ETag.replace(/"/g, '');
 
                 // Get an md5 of the local file so we can verify the upload.
                 var localHash = crypto.createHash('md5').update(data).digest('hex');
@@ -416,7 +418,7 @@ exports.init = function (grunt) {
    *     option declared in the global s3 config.
    */
   exports.sync = function (src, dest, opts) {
-    console.log('testing stync');
+    console.log('testing synC');
     var dfd = new _.Deferred();
     var options = _.clone(opts);
 
@@ -434,15 +436,14 @@ exports.init = function (grunt) {
     // Check for the file on s3
     if( !options.verify ) {
       client.headObject({ Bucket: options.bucket, Key: dest }, function (err, res) {
-        console.log('headObject', err, res);
         var upload;
 
         // If the file was not found, then we should be able to continue with a normal upload procedure
-        if (res && res.statusCode === 404) {
+        if (err && err.statusCode === 404) {
           upload = exports.upload( src, dest, opts);
           // pass through the dfd state
           upload.then( dfd.resolve, dfd.reject );
-        } else if (!res || err || res.statusCode !== 200 ) {
+        } else if (!res || err ) {
           dfd.reject(makeError(MSG_ERR_DOWNLOAD, src, err || res.statusCode));
         } else {
           // the file exists so do nothing with that
@@ -454,15 +455,13 @@ exports.init = function (grunt) {
       client.getObject({ Bucket: options.bucket, Key: dest }, function(err, res) {
         var upload;
 
-        console.log('a country boy can survive', err, res);
-
         // If the file was not found, then we should be able to continue with a normal upload procedure
-        if (res && res.statusCode === 404) {
+        if (err && err.statusCode === 404) {
           upload = exports.upload( src, dest, opts);
           // pass through the dfd state
           upload.then( dfd.resolve, dfd.reject );
         } 
-        else if (!res || err || res.statusCode !== 200 ) {
+        else if (!res || err) {
           dfd.reject(makeError(MSG_ERR_DOWNLOAD, src, err || res.statusCode));
         } 
         else {
@@ -477,7 +476,7 @@ exports.init = function (grunt) {
             else {
               // The etag head in the response from s3 has double quotes around
               // it. Strip them out.
-              remoteHash = res.headers.etag.replace(/"/g, '');
+              remoteHash = res.ETag.replace(/"/g, '');
 
               // Get an md5 of the local file so we can verify the upload.
               localHash = crypto.createHash('md5').update(data).digest('hex');
@@ -495,7 +494,7 @@ exports.init = function (grunt) {
                   } 
                   else {
                     // which one is newer? if local is newer, we should upload it
-                    remoteWhen = new Date(res.headers['last-modified'] || "0"); // earliest date possible if no header is returned
+                    remoteWhen = new Date(res.LastModified || "0"); // earliest date possible if no header is returned
                     localWhen = new Date(stats.mtime || "1"); // make second earliest date possible if mtime isn't set
 
                     if( localWhen > remoteWhen ) {
