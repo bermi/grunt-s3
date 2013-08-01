@@ -101,7 +101,7 @@ grunt.initConfig({
 
           // But if you use wildcards, make sure your destination is a directory.
           dest: 'documents/'
-        }
+        }        
       ],
 
       // Files to be downloaded.
@@ -123,7 +123,15 @@ grunt.initConfig({
         {
           src: 'documents/backup_plan.txt'
         }
-      ]
+      ],
+      
+      copy: [
+        // copy a file from <bucketname>/test.html to <bucketname>/testcopy.html
+		{
+		  src: 'bucketname/test.html',
+		  dest: 'testcopy.html'
+		}
+	  ]
     }
 
   }

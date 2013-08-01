@@ -131,7 +131,7 @@ exports.init = function (grunt) {
     var headers = options.headers || {};
 
     // Pick out the configuration options we need for the client.
-    options = _.pick(options, [ 'region', 'endpoint', 'port', 'key', 'secret', 'access', 'bucket', 'secure', 'debug' ]);
+    options = _.pick(options, [ 'region', 'endpoint', 'port', 'key', 'secret', 'access', 'bucket', 'secure', 'gzip', 'gzipExclude', 'debug' ]);
     
     options.access = options.access || 'private';  // set the default ACL
 
@@ -177,10 +177,8 @@ exports.init = function (grunt) {
                   cb(makeError(MSG_ERR_CHECKSUM, 'Upload', localHash, remoteHash, src));
                 }
               }
-
             }
           );
-
         }
       });
     };
@@ -192,17 +190,17 @@ exports.init = function (grunt) {
       gzipExclude = [];
     }
 
+    headers['Content-Type'] = headers['Content-Type'] || mime.lookup(src);
+    var charset = mime.charsets.lookup(headers['Content-Type'], null);
+    if (charset) {
+      headers['Content-Type'] += '; charset=' + charset;
+    }
+
     // If gzip is enabled and file not in gzip exclude array,
     // gzip the file into a temp file and then perform the upload.
     if (options.gzip && gzipExclude.indexOf(path.extname(src)) === -1) {
       headers['Content-Encoding'] = 'gzip';
-      headers['Content-Type'] = headers['Content-Type'] || mime.lookup(src);
-
-      var charset = mime.charsets.lookup(headers['Content-Type'], null);
-      if (charset) {
-        headers['Content-Type'] += '; charset=' + charset;
-      }
-
+     
       var tmp = new Tempfile();
       var input = fs.createReadStream(src);
       var output = fs.createWriteStream(tmp.path);
