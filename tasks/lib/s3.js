@@ -416,13 +416,16 @@ exports.init = function (grunt) {
    *     option declared in the global s3 config.
    */
   exports.sync = function (src, dest, opts) {
+    console.log('testing stync');
     var dfd = new _.Deferred();
     var options = _.clone(opts);
 
     // Pick out the configuration options we need for the client.
-    var client = knox.createClient(_(options).pick([
-      'region', 'endpoint', 'port', 'key', 'secret', 'access', 'bucket'
-    ]));
+    options = _.pick(options, [ 'region', 'endpoint', 'port', 'key', 'secret', 'access', 'bucket', 'verify', 'debug' ]);
+
+    updateAmazonConfig(options.key, options.secret);
+
+    var client = new aws.S3(options);
 
     if (options.debug) {
       return dfd.resolve(util.format(MSG_SKIP_DEBUG, client.bucket, src)).promise();
@@ -430,7 +433,8 @@ exports.init = function (grunt) {
 
     // Check for the file on s3
     if( !options.verify ) {
-      client.headFile(dest, function (err, res) {
+      client.headObject({ Bucket: options.bucket, Key: dest }, function (err, res) {
+        console.log('headObject', err, res);
         var upload;
 
         // If the file was not found, then we should be able to continue with a normal upload procedure
@@ -447,8 +451,10 @@ exports.init = function (grunt) {
       }).end();
     } else {
       // verify was truthy, so we need to make sure that this file is actually the file it thinks it is
-      client.getFile( dest, function(err, res) {
+      client.getObject({ Bucket: options.bucket, Key: dest }, function(err, res) {
         var upload;
+
+        console.log('a country boy can survive', err, res);
 
         // If the file was not found, then we should be able to continue with a normal upload procedure
         if (res && res.statusCode === 404) {
@@ -500,7 +506,6 @@ exports.init = function (grunt) {
                     } else {
                       dfd.resolve(util.format(MSG_SKIP_OLDER, src));
                     }
-
                   }
                 });
               }
@@ -508,7 +513,6 @@ exports.init = function (grunt) {
           });
         }
       }).end();
-
     }
 
     return dfd.promise();
