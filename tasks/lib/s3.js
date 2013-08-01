@@ -339,34 +339,26 @@ exports.init = function (grunt) {
     var options = _.clone(opts);
 
     // Pick out the configuration options we need for the client.
-    var client = knox.createClient(_(options).pick([
-      'region', 'endpoint', 'port', 'key', 'secret', 'access', 'bucket'
-    ]));
+    options = _.pick(options, [ 'region', 'endpoint', 'port', 'key', 'secret', 'access', 'bucket', 'debug' ]);
+
+    updateAmazonConfig(options.key, options.secret);
+
+    var client = new aws.S3(options);
 
     if (options.debug) {
       return dfd.resolve(util.format(MSG_COPY_DEBUG, src, client.bucket, dest)).promise();
     }
 
-    var headers = {
-      'Content-Length': 0,
-      'x-amz-copy-source': src
-    };
-
-    if (options.headers) {
-      _(headers).extend(options.headers);
-      headers['x-amz-metadata-directive'] = 'REPLACE';
-    }
-
     // Copy the src file to dest.
-    var req = client.put(dest, headers);
-
-    req.on('response', function (res) {
-      if (res.statusCode !== 200) {
+    client.copyObject({ Bucket: options.bucket, Key: dest, MetadataDirective: 'REPLACE', CopySource: src }, function(err, res) {
+      // If there was a copy error or no RequestId, assume something went wrong.
+      if (err || !res.RequestId) {
         dfd.reject(makeError(MSG_ERR_COPY, src, dest));
       }
       else {
         dfd.resolve(util.format(MSG_COPY_SUCCESS, src, dest));
       }
+
     });
 
     return dfd.promise();
@@ -385,17 +377,20 @@ exports.init = function (grunt) {
     var options = _.clone(opts);
 
     // Pick out the configuration options we need for the client.
-    var client = knox.createClient(_(options).pick([
-      'region', 'endpoint', 'port', 'key', 'secret', 'access', 'bucket'
-    ]));
+    options = _.pick(options, [ 'region', 'endpoint', 'port', 'key', 'secret', 'access', 'bucket', 'debug' ]);
+
+    updateAmazonConfig(options.key, options.secret);
+
+    var client = new aws.S3(options);
 
     if (options.debug) {
       return dfd.resolve(util.format(MSG_DELETE_DEBUG, client.bucket, src)).promise();
     }
 
     // Upload the file to this endpoint.
-    client.deleteFile(src, function (err, res) {
-      if (err || res.statusCode !== 204) {
+    client.deleteObject({ Bucket: options.bucket, Key: src}, function (err, res) {
+      // If there was a deletion error or no RequestId, assume something went wrong.
+      if (err || !res.RequestId) {
         dfd.reject(makeError(MSG_ERR_DELETE, src, err || res.statusCode));
       }
       else {
