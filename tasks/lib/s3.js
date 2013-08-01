@@ -49,7 +49,7 @@ var MSG_ERR_COPY = 'Copy error: %s to %s';
 var MSG_ERR_CHECKSUM = '%s error: expected hash: %s but found %s for %s';
 
 
-function updateAmazonConfig (key, secret, secure) {  
+function updateAmazonConfig (key, secret, secure) {
   // set the configuration options on the Amazon S3 object
   aws.config.update({
     accessKeyId : key,
@@ -66,6 +66,7 @@ function generateAmazonParams(dest, body, headers, options) {
     ACL        : options.access,
     Body       : body,
     Bucket     : options.bucket,
+    // TODO: why does this cause S3 upload failure?   https://github.com/fog/fog/issues/928
     //ContentMD5 : new Buffer(localHash).toString('base64'),
     Key        : dest 
   };
@@ -101,6 +102,8 @@ exports.init = function (grunt) {
     var msg = util.format.apply(util, _.toArray(arguments));
     return new Error(msg);
   };
+
+
 
   /**
    * Publishes the local file at src to the s3 dest.
@@ -275,27 +278,47 @@ exports.init = function (grunt) {
         return dfd.reject(makeError(MSG_ERR_DOWNLOAD, src, err || res.statusCode));
       }
 
-      fs.writeFile(dest, res.Body, {}, function(err){
-        if (err){
-          return dfd.reject(makeError(MSG_ERR_DOWNLOAD, src, err));
-        }
-        else {
-          // The etag head in the response from s3 has double quotes around it.
-          // Strip them out.
-          var remoteHash = res.ETag.replace(/"/g, '');
+      // The etag head in the response from s3 has double quotes around it.
+      // Strip them out.
+      var remoteHash = res.ETag.replace(/"/g, '');
 
-          // Get an md5 of the local file so we can verify the download.
-          var localHash = crypto.createHash('md5').update(res.Body).digest('hex');
+      // Get an md5 of the local file so we can verify the download.
+      var localHash = crypto.createHash('md5').update(res.Body).digest('hex');
 
-          if (remoteHash === localHash) {
+      if (remoteHash !== localHash) {
+        return dfd.reject(makeError(MSG_ERR_CHECKSUM, 'Download', localHash, remoteHash, src));
+      }
+
+      if(res.ContentEncoding == 'gzip') {
+        zlib.gunzip(res.Body, function(err, data){
+          if(err) {
+            dfd.reject(makeError(MSG_ERR_DOWNLOAD, src, err));
+          }
+          else {
+            fs.writeFile(dest, data, function(err){
+              if (err) {
+                dfd.reject(err);
+              }
+              else {
+                var msg = util.format(MSG_DOWNLOAD_SUCCESS, src, localHash);
+                dfd.resolve(msg);
+              }
+            });
+          }
+        });
+      }
+      else {
+        fs.writeFile(dest, res.Body, function(err){
+          if (err) {
+            dfd.reject(err);
+          }
+          else {
             var msg = util.format(MSG_DOWNLOAD_SUCCESS, src, localHash);
             dfd.resolve(msg);
           }
-          else {
-            dfd.reject(makeError(MSG_ERR_CHECKSUM, 'Download', localHash, remoteHash, src));
-          }
-        }
-      });
+        });
+      }
+
     });
 
     return dfd.promise();
