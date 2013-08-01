@@ -12,7 +12,7 @@ transfers are verified and will produce errors if incomplete.
 
 ## Dependencies
 
-* knox
+* aws-sdk
 * mime
 * async
 * underscore

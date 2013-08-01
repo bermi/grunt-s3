@@ -49,25 +49,7 @@ var MSG_ERR_COPY = 'Copy error: %s to %s';
 var MSG_ERR_CHECKSUM = '%s error: expected hash: %s but found %s for %s';
 
 
-function updateAmazonConfig (key, secret, secure) {
-  // TODO: this might be useful, but remove it later if not
-    /*
-    // convert the config keys to ones that Amazon's SDK understands
-    var awsOptMap = {
-      key    : 'accessKeyId',
-      secret : 'secretAccessKey',
-      secure : 'sslEnabled'
-    };
-
-    var awsKey, key;
-    for (key in awsOptMap) {
-      awsKey = awsOptMap[key];
-      if (options[key]) {
-        options[awsKey] = options[key];
-      }
-    }
-    */
-  
+function updateAmazonConfig (key, secret, secure) {  
   // set the configuration options on the Amazon S3 object
   aws.config.update({
     accessKeyId : key,
@@ -78,13 +60,13 @@ function updateAmazonConfig (key, secret, secure) {
 
 function generateAmazonParams(dest, body, headers, options) {
   // Get an md5 of the local file so we can verify the upload.
-  var localHash = crypto.createHash('md5').update(body).digest('hex');
+  //var localHash = crypto.createHash('md5').update(body).digest('hex');
 
   var params = {
     ACL        : options.access,
     Body       : body,
     Bucket     : options.bucket,
-    ContentMD5 : localHash,
+    //ContentMD5 : new Buffer(localHash).toString('base64'),
     Key        : dest 
   };
 
@@ -156,8 +138,7 @@ exports.init = function (grunt) {
       return dfd.resolve(util.format(MSG_UPLOAD_DEBUG, path.relative(process.cwd(), src), client.bucket, dest)).promise();
     }
 
-    // Encapsulate this logic to make it easier to gzip the file first if
-    // necesssary.
+    // Encapsulate this logic to make it easier to gzip the file first if necesssary
     var upload = function (cb) {
       cb = cb || function () {};
 
@@ -171,11 +152,9 @@ exports.init = function (grunt) {
 
           // Upload the file to s3.
           client.putObject(params, function(err, res){
-              console.log('upload response', err, res);
-              // If there was an upload error or any status other than a 200, we
-              // can assume something went wrong.
-              if (err || res.statusCode !== 200) {
-                cb(makeError(MSG_ERR_UPLOAD, src, err || res.statusCode));
+              // If there was an upload error or no RequestId, assume something went wrong.
+              if (err || !res.RequestId) {
+                cb(makeError(MSG_ERR_UPLOAD, src, err || res));
               }
               else {
                 // The etag head in the response from s3 has double quotes around
@@ -291,11 +270,12 @@ exports.init = function (grunt) {
 
     // get the file from s3
     client.getObject({ Bucket: options.bucket, Key: src }, function(err, res) {
-      if (err || res.statusCode !== 200) {
+      // If there was a download error or no RequestId, assume something went wrong.
+      if (err || !res.RequestId) {
         return dfd.reject(makeError(MSG_ERR_DOWNLOAD, src, err || res.statusCode));
       }
 
-      fs.writeFile(dest, res.Body, function(err){
+      fs.writeFile(dest, res.Body, {}, function(err){
         if (err){
           return dfd.reject(makeError(MSG_ERR_DOWNLOAD, src, err));
         }
