@@ -32,15 +32,15 @@
   ],
   "dependencies": {
     "grunt": "0.4.x",
-    "underscore.deferred": "~0.1.4",
+    "underscore.deferred": "0.4.x",
     "aws-sdk": "1.4.x",
-    "mime": "~1.2.5",
+    "mime": "1.2.x",
     "temporary": "0.0.5"
   },
   "devDependencies": {
     "nodeunit": "~0.7.4",
     "grunt-contrib-jshint": "~0.1.0",
     "grunt-contrib-nodeunit": "~0.1.1",
-    "libyaml": "~0.2.1"
+    "libyaml": "0.2.x"
   }
 }
