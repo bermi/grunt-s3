@@ -416,7 +416,6 @@ exports.init = function (grunt) {
    *     option declared in the global s3 config.
    */
   exports.sync = function (src, dest, opts) {
-    console.log('testing synC');
     var dfd = new _.Deferred();
     var options = _.clone(opts);
 
@@ -447,7 +446,7 @@ exports.init = function (grunt) {
           // the file exists so do nothing with that
           dfd.resolve(util.format(MSG_SKIP_SUCCESS, src));
         }
-      }).end();
+      });
     } else {
       // verify was truthy, so we need to make sure that this file is actually the file it thinks it is
       client.getObject({ Bucket: options.bucket, Key: dest }, function(err, res) {
@@ -509,7 +508,7 @@ exports.init = function (grunt) {
             }
           });
         }
-      }).end();
+      });
     }
 
     return dfd.promise();
