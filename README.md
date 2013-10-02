@@ -65,7 +65,7 @@ This is **important because you should never check in your S3 credentials to git
 
 ```javascript
 grunt.initConfig({
-  aws: grunt.file.readJSON('~/grunt-aws.json'),
+  aws: grunt.file.readJSON(process.env.HOME+'/grunt-aws.json'),
   s3: {
     options: {
       key: '<%= aws.key %>',
